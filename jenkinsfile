@@ -4,65 +4,93 @@ def COLOR_MAP = [
     'SUCCESS': 'good',
     'ALERT': 'warning',
     'FAILURE': 'danger'
-    ]
-    
+]
+
 def getBuildUser(){
-    return currentBuild.rawBuild.getCause(Cause.UserIdCause).getUserId()
+    def userCause = currentBuild.rawBuild.getCause(Cause.UserIdCause)
+    return userCause ? userCause.getUserId() : "Automated/Unknown"
 }
 
 pipeline {
     agent any
     
-    environment{
+    environment {
         BUILD_USER = ''
+        currentStage = '' // Variable to track current stage
     }
+
     parameters {
-        gitParameter branchFilter: 'origin/(.*)', defaultValue: 'default_branch', name: 'BRANCH', type: 'PT_BRANCH'
+        gitParameter branchFilter: 'origin/(.*)', defaultValue: 'default_branch_name', name: 'BRANCH', type: 'PT_BRANCH'
     }
+
     stages {
-        stage('slack') {
+        
+        stage('Initialise') {
             steps {
-                slackSend channel: 'project_name',
-                         color: 'warning',
-                         message: 'Project Name Build Initiated'
+                script{
+                  BUILD_USER = getBuildUser()
+                  currentStage = 'Initialise'
+                }
+                slackSend channel: 'channel_name',
+                        color: 'warning',
+                      message: "${JOB_NAME} Build Initiated by ${BUILD_USER}"
             }
         }
-        stage('Initialise'){
-            steps{
+        
+        stage('clone') {
+            steps {
+                script {
+                    currentStage = 'Clone'
+                }
                 git branch: "${params.BRANCH}", credentialsId: 'credential_id', url: 'repository_ssh_url'
             }
         }
+
         stage ('Build') {
             steps{
+                script{
+                  currentStage = 'Build'
+                }
                 // input(message: 'Create Build?', ok: 'Build')
                 sh 'npm i --legacy-peer-deps'
                 sh 'npm run build:dev'
             }
         }
-        stage ('Publish') {
+
+        stage('Deploy') {
             steps {
-                // input(message: 'Create Zip?', ok: 'Zip')
-                script{
-                sh 'zip -r dist_$BUILD_NUMBER.zip dist'
-                sh 'aws s3 cp /var/lib/jenkins/workspace/$JOB_NAME/dist_$BUILD_NUMBER.zip s3:/backup_bucket_name/'
-                }    
-            }
-        }
-        stage ('Deploy') {
-            steps {
-                // input(message: 'Deploy?', ok: 'Deploy')
+                script {
+                    currentStage = 'Deploy'
+                }
                 sh 'aws s3 cp /var/lib/jenkins/workspace/$JOB_NAME/build/ s3://bucket_name/ --recursive'
             }
         }
     }
-    post{
-        always{
-            script{
+
+    post {
+        success {
+            script {
                 BUILD_USER = getBuildUser()
             }
-            slackSend channel: 'project_name',
-                     color: COLOR_MAP[currentBuild.currentResult],
-                     message: "*${currentBuild.currentResult}:* Project Name Build ${env.BUILD_NUMBER} By ${BUILD_USER}"
+            slackSend channel: 'channel_name',
+                      color: COLOR_MAP['SUCCESS'],
+                      message: "SUCCESS: Build ${JOB_NAME} ${env.BUILD_NUMBER} succeeded by ${BUILD_USER}"
         }
+        failure {
+            script {
+                BUILD_USER = getBuildUser()
+            }
+            slackSend channel: 'channel_name',
+                      color: COLOR_MAP['FAILURE'],
+                      message: "FAILURE: Build ${JOB_NAME} ${env.BUILD_NUMBER} failed in *${currentStage}* stage by ${BUILD_USER}"
+        }
+        // always {
+        //     script {
+        //         BUILD_USER = getBuildUser()
+        //     }
+        //     slackSend channel: 'channel_name',
+        //              color: COLOR_MAP[currentBuild.currentResult],
+        //              message: "*${currentBuild.currentResult}:* Project Name Build ${env.BUILD_NUMBER} by ${BUILD_USER}"
+        // }
     }
 }
