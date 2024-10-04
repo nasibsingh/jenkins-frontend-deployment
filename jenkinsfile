@@ -1,10 +1,32 @@
+import groovy.json.JsonOutput
+
+def COLOR_MAP = [
+    'SUCCESS': 'good',
+    'ALERT': 'warning',
+    'FAILURE': 'danger'
+    ]
+    
+def getBuildUser(){
+    return currentBuild.rawBuild.getCause(Cause.UserIdCause).getUserId()
+}
+
 pipeline {
     agent any
     
+    environment{
+        BUILD_USER = ''
+    }
     parameters {
         gitParameter branchFilter: 'origin/(.*)', defaultValue: 'default_branch', name: 'BRANCH', type: 'PT_BRANCH'
     }
     stages {
+        stage('slack') {
+            steps {
+                slackSend channel: 'project_name',
+                         color: 'warning',
+                         message: 'Project Name Build Initiated'
+            }
+        }
         stage('Initialise'){
             steps{
                 git branch: "${params.BRANCH}", credentialsId: 'credential_id', url: 'repository_ssh_url'
@@ -25,12 +47,22 @@ pipeline {
                 sh 'aws s3 cp /var/lib/jenkins/workspace/$JOB_NAME/dist_$BUILD_NUMBER.zip s3:/backup_bucket_name/'
                 }    
             }
-        }}
+        }
         stage ('Deploy') {
             steps {
                 // input(message: 'Deploy?', ok: 'Deploy')
                 sh 'aws s3 cp /var/lib/jenkins/workspace/$JOB_NAME/build/ s3://bucket_name/ --recursive'
             }
+        }
+    }
+    post{
+        always{
+            script{
+                BUILD_USER = getBuildUser()
+            }
+            slackSend channel: 'project_name',
+                     color: COLOR_MAP[currentBuild.currentResult],
+                     message: "*${currentBuild.currentResult}:* Project Name Build ${env.BUILD_NUMBER} By ${BUILD_USER}"
         }
     }
 }
