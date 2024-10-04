@@ -1,0 +1,36 @@
+pipeline {
+    agent any
+    
+    parameters {
+        gitParameter branchFilter: 'origin/(.*)', defaultValue: 'default_branch', name: 'BRANCH', type: 'PT_BRANCH'
+    }
+    stages {
+        stage('Initialise'){
+            steps{
+                git branch: "${params.BRANCH}", credentialsId: 'credential_id', url: 'repository_ssh_url'
+            }
+        }
+        stage ('Build') {
+            steps{
+                // input(message: 'Create Build?', ok: 'Build')
+                sh 'npm i --legacy-peer-deps'
+                sh 'npm run build:dev'
+            }
+        }
+        stage ('Publish') {
+            steps {
+                // input(message: 'Create Zip?', ok: 'Zip')
+                script{
+                sh 'zip -r dist_$BUILD_NUMBER.zip dist'
+                sh 'aws s3 cp /var/lib/jenkins/workspace/$JOB_NAME/dist_$BUILD_NUMBER.zip s3:/backup_bucket_name/'
+                }    
+            }
+        }}
+        stage ('Deploy') {
+            steps {
+                // input(message: 'Deploy?', ok: 'Deploy')
+                sh 'aws s3 cp /var/lib/jenkins/workspace/$JOB_NAME/build/ s3://bucket_name/ --recursive'
+            }
+        }
+    }
+}
